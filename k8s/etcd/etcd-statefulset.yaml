@@ -1,0 +1,155 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd-headless
+  namespace: immutable-ledger
+  labels:
+    app: etcd
+spec:
+  ports:
+  - port: 2379
+    name: client
+  - port: 2380
+    name: peer
+  clusterIP: None
+  selector:
+    app: etcd
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: etcd-client
+  namespace: immutable-ledger
+  labels:
+    app: etcd
+spec:
+  type: ClusterIP
+  ports:
+  - port: 2379
+    targetPort: 2379
+    name: client
+  selector:
+    app: etcd
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: etcd
+  namespace: immutable-ledger
+  labels:
+    app: etcd
+spec:
+  serviceName: etcd-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: etcd
+  template:
+    metadata:
+      labels:
+        app: etcd
+    spec:
+      containers:
+      - name: etcd
+        image: quay.io/coreos/etcd:v3.5.12
+        ports:
+        - containerPort: 2379
+          name: client
+        - containerPort: 2380
+          name: peer
+        env:
+        - name: ETCD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: ETCD_INITIAL_CLUSTER
+          value: "etcd-0=https://etcd-0.etcd-headless.immutable-ledger.svc.cluster.local:2380,etcd-1=https://etcd-1.etcd-headless.immutable-ledger.svc.cluster.local:2380,etcd-2=https://etcd-2.etcd-headless.immutable-ledger.svc.cluster.local:2380"
+        - name: ETCD_INITIAL_CLUSTER_STATE
+          value: "new"
+        - name: ETCD_INITIAL_CLUSTER_TOKEN
+          value: "immutable-ledger-cluster"
+        # Peer communication (node-to-node) with TLS
+        - name: ETCD_LISTEN_PEER_URLS
+          value: "https://0.0.0.0:2380"
+        - name: ETCD_INITIAL_ADVERTISE_PEER_URLS
+          value: "https://$(ETCD_NAME).etcd-headless.immutable-ledger.svc.cluster.local:2380"
+        - name: ETCD_PEER_CERT_FILE
+          value: "/etc/etcd/peer-tls/tls.crt"
+        - name: ETCD_PEER_KEY_FILE
+          value: "/etc/etcd/peer-tls/tls.key"
+        - name: ETCD_PEER_TRUSTED_CA_FILE
+          value: "/etc/etcd/peer-tls/ca.crt"
+        - name: ETCD_PEER_CLIENT_CERT_AUTH
+          value: "true"
+        # Client communication (external access) with TLS
+        - name: ETCD_LISTEN_CLIENT_URLS
+          value: "https://0.0.0.0:2379"
+        - name: ETCD_ADVERTISE_CLIENT_URLS
+          value: "https://$(ETCD_NAME).etcd-headless.immutable-ledger.svc.cluster.local:2379"
+        - name: ETCD_CERT_FILE
+          value: "/etc/etcd/peer-tls/tls.crt"
+        - name: ETCD_KEY_FILE
+          value: "/etc/etcd/peer-tls/tls.key"
+        - name: ETCD_TRUSTED_CA_FILE
+          value: "/etc/etcd/peer-tls/ca.crt"
+        - name: ETCD_CLIENT_CERT_AUTH
+          value: "true"
+        # Data and performance settings
+        - name: ETCD_DATA_DIR
+          value: /var/run/etcd/default.etcd
+        - name: ETCD_HEARTBEAT_INTERVAL
+          value: "100"
+        - name: ETCD_ELECTION_TIMEOUT
+          value: "1000"
+        - name: ETCD_SNAPSHOT_COUNT
+          value: "10000"
+        - name: ETCD_MAX_SNAPSHOTS
+          value: "5"
+        - name: ETCD_MAX_WALS
+          value: "5"
+        - name: ETCD_QUOTA_BACKEND_BYTES
+          value: "8589934592"
+        volumeMounts:
+        - name: etcd-data
+          mountPath: /var/run/etcd
+        - name: etcd-peer-tls
+          mountPath: /etc/etcd/peer-tls
+          readOnly: true
+        - name: etcd-client-tls
+          mountPath: /etc/etcd/client-tls
+          readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        livenessProbe:
+          tcpSocket:
+            port: 2379
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        readinessProbe:
+          tcpSocket:
+            port: 2379
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+      volumes:
+      - name: etcd-peer-tls
+        secret:
+          secretName: etcd-peer-tls
+      - name: etcd-client-tls
+        secret:
+          secretName: etcd-client-tls
+  volumeClaimTemplates:
+  - metadata:
+      name: etcd-data
+    spec:
+      accessModes: ["ReadWriteOnce"]
+      storageClassName: "standard-rwo"
+      resources:
+        requests:
+          storage: 10Gi

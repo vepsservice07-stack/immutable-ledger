@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledger-service
+  namespace: immutable-ledger
+  labels:
+    app: ledger-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 50051
+    targetPort: 50051
+    protocol: TCP
+    name: grpc
+  selector:
+    app: ledger-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-service
+  namespace: immutable-ledger
+  labels:
+    app: ledger-service
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: ledger-service
+  template:
+    metadata:
+      labels:
+        app: ledger-service
+    spec:
+      containers:
+      - name: ledger-service
+        image: gcr.io/immutable-ledger/ledger-service:v1
+        ports:
+        - containerPort: 50051
+          name: grpc
+        env:
+        - name: RUST_LOG
+          value: "info"
+        - name: ETCD_ENDPOINTS
+          value: "https://etcd-0.etcd-headless.immutable-ledger.svc.cluster.local:2379,https://etcd-1.etcd-headless.immutable-ledger.svc.cluster.local:2379,https://etcd-2.etcd-headless.immutable-ledger.svc.cluster.local:2379"
+        - name: ETCD_CA_CERT
+          value: "/etc/etcd-certs/ca.crt"
+        - name: ETCD_CLIENT_CERT
+          value: "/etc/etcd-certs/tls.crt"
+        - name: ETCD_CLIENT_KEY
+          value: "/etc/etcd-certs/tls.key"
+        volumeMounts:
+        - name: etcd-certs
+          mountPath: /etc/etcd-certs
+          readOnly: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "pidof ledger-service"
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          tcpSocket:
+            port: 50051
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      - name: etcd-certs
+        secret:
+          secretName: etcd-peer-tls

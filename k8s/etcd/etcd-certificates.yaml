@@ -1,0 +1,100 @@
+---
+# Self-signed ClusterIssuer (acts as our CA)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+# Root CA Certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: etcd-ca
+  namespace: immutable-ledger
+spec:
+  isCA: true
+  commonName: etcd-ca
+  secretName: etcd-ca-secret
+  privateKey:
+    algorithm: RSA
+    size: 4096
+  issuerRef:
+    name: selfsigned-issuer
+    kind: ClusterIssuer
+---
+# CA Issuer (uses the CA cert we just created)
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: etcd-ca-issuer
+  namespace: immutable-ledger
+spec:
+  ca:
+    secretName: etcd-ca-secret
+---
+# Peer Certificate (for etcd node-to-node communication)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: etcd-peer-cert
+  namespace: immutable-ledger
+spec:
+  secretName: etcd-peer-tls
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days
+  subject:
+    organizations:
+      - immutable-ledger
+  commonName: "*.etcd-headless.immutable-ledger.svc.cluster.local"
+  dnsNames:
+  - "*.etcd-headless.immutable-ledger.svc.cluster.local"
+  - "etcd-headless.immutable-ledger.svc.cluster.local"
+  - "etcd-0.etcd-headless.immutable-ledger.svc.cluster.local"
+  - "etcd-1.etcd-headless.immutable-ledger.svc.cluster.local"
+  - "etcd-2.etcd-headless.immutable-ledger.svc.cluster.local"
+  - "localhost"
+  ipAddresses:
+  - "127.0.0.1"
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+    - digital signature
+    - key encipherment
+    - server auth
+    - client auth
+  issuerRef:
+    name: etcd-ca-issuer
+    kind: Issuer
+---
+# Client Certificate (for applications connecting to etcd)
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: etcd-client-cert
+  namespace: immutable-ledger
+spec:
+  secretName: etcd-client-tls
+  duration: 8760h # 1 year
+  renewBefore: 720h # 30 days
+  subject:
+    organizations:
+      - immutable-ledger
+  commonName: etcd-client
+  dnsNames:
+  - "etcd-client.immutable-ledger.svc.cluster.local"
+  - "localhost"
+  ipAddresses:
+  - "127.0.0.1"
+  privateKey:
+    algorithm: RSA
+    size: 2048
+  usages:
+    - digital signature
+    - key encipherment
+    - client auth
+  issuerRef:
+    name: etcd-ca-issuer
+    kind: Issuer
